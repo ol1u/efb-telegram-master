@@ -40,7 +40,10 @@ class MasterMessageProcessor(LocaleMixin):
     """
 
     DELETE_FLAG = 'rm`'
-    TG_IMAGE_DOCUMENT_RE = re.compile(r"^tg_image_.+\.png$", re.IGNORECASE)
+    TG_IMAGE_DOCUMENT_RE = re.compile(
+        r"^tg_image_.+\.(?:jpe?g|png|tiff?|webp)$",
+        re.IGNORECASE,
+    )
 
     # Constants
     TYPE_DICT = {
