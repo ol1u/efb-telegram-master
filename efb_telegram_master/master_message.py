@@ -212,9 +212,7 @@ class MasterMessageProcessor(LocaleMixin):
         except FuturesTimeoutError:
             self.logger.error("调用 slave 发送消息超时(%ss,类型=%s),已放弃等待",
                               timeout, getattr(m, "type", "?"))
-            raise EFBMessageError(
-                self._("Slave channel timed out while sending the message. "
-                       "Please check on the slave side whether it was delivered."))
+            raise EFBMessageError("[ETM] 调用 Slave 超时,请在微信端确认是否已发送")
 
     def message_worker(self):
         """保留原方法名以兼容:现在仅做分发,实际处理在 _chat_worker_loop。"""
