@@ -86,6 +86,8 @@ class SlaveMessageProcessor(LocaleMixin):
         Args:
             msg (Message): The message.
         """
+        tg_dest = None
+        thread_id = None
         try:
             xid = msg.uid
             self.logger.debug("[%s] Slave message delivered to ETM.\n%s", xid, msg)
@@ -117,43 +119,19 @@ class SlaveMessageProcessor(LocaleMixin):
                                      'but it does not exist in database. Sending new message instead.',
                                      msg.uid)
 
-            self._dispatch_with_retry(msg=msg, msg_template=msg_template, old_msg_id=old_msg_id,
-                                        tg_dest=tg_dest, thread_id=thread_id, silent=silent)
+            self.dispatch_message(msg=msg, msg_template=msg_template, old_msg_id=old_msg_id, tg_dest=tg_dest, thread_id=thread_id, silent=silent)
         except Exception as e:
             self.logger.error("Error occurred while processing message from slave channel.\nMessage: %s\n%s\n%s",
                               repr(msg), repr(e), traceback.format_exc())
+            # 投递失败时给用户一条 TG 提示,避免无声丢失。
+            # 不重试,不改变投递次数;提示本身尽力而为,失败只记日志。
+            if tg_dest:
+                try:
+                    self.bot.send_message(chat_id=tg_dest, message_thread_id=thread_id,
+                                          text="[消息投递失败,请在微信端查看]")
+                except Exception:
+                    self.logger.exception("[%s] 发送投递失败提示失败", msg.uid)
         return msg
-
-    def _dispatch_with_retry(self, msg: Message, msg_template: str,
-                             old_msg_id: Optional[OldMsgID],
-                             tg_dest, thread_id, silent: bool,
-                             max_retries: int = 3) -> bool:
-        """投递消息到 Telegram,网络瞬断时有限重试。
-
-        之前所有异常都被吞掉只记日志,消息无声丢失。这里区分:
-        - TimedOut/NetworkError:瞬时网络问题,有限次重试(退避 2/4/8 秒),
-          避免无限重试导致重复投递,也避免直接丢消息;
-        - 其他异常:直接抛给上层记 ERROR,不重试。
-        返回 True 表示投递成功,False 表示重试后仍失败。
-        """
-        import time as _time
-        last_exc = None
-        for attempt in range(max_retries):
-            try:
-                self.dispatch_message(msg=msg, msg_template=msg_template, old_msg_id=old_msg_id,
-                                      tg_dest=tg_dest, thread_id=thread_id, silent=silent)
-                return True
-            except (telegram.error.TimedOut, telegram.error.NetworkError) as e:
-                last_exc = e
-                self.logger.warning("[%s] 发送到 Telegram 网络超时(尝试 %d/%d): %s",
-                                    msg.uid, attempt + 1, max_retries, e)
-                if attempt + 1 < max_retries:
-                    _time.sleep(2 ** (attempt + 1))
-            except Exception:
-                raise
-        self.logger.error("[%s] 发送到 Telegram %d 次重试后仍失败,消息已丢失: %s",
-                          msg.uid, max_retries, last_exc)
-        return False
 
     @staticmethod
     def handle_topic_error(fn):
