@@ -115,7 +115,16 @@ class MasterMessageProcessor(LocaleMixin):
         # slave 调用执行器:coordinator.send_message 同步调 slave,slave hanging
         # (如 hook 卡住)时不能卡死 worker 线程,故加超时隔离。
         self._slave_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="etm-slave-call")
-        self._slave_call_timeout = 120  # 单次 slave 调用超时(秒)
+        # 按消息类型分级超时:TG API 限制 20MB,绝大多数是文字/图片,小超时快失败;
+        # 即时通讯场景下,等 120 秒才知道失败体验太差。
+        self._slave_timeout_tiers = {
+            MsgType.Text: 15,
+            MsgType.Image: 30,
+            MsgType.Sticker: 30,
+            MsgType.Animation: 30,
+            MsgType.Location: 15,
+        }
+        self._slave_timeout_default = 60  # 文件/视频/语音等,默认 60 秒
 
     def _dispatch_loop(self):
         """分发线程:从全局队列取消息,按 TG 聊天 ID 路由到对应的聊天队列。"""
@@ -187,16 +196,22 @@ class MasterMessageProcessor(LocaleMixin):
                     self._active_chats.discard(target_key)
                     self._chat_queues_cond.notify_all()
 
+    def _slave_timeout_for(self, m) -> int:
+        """按消息类型取 slave 调用超时(秒)。"""
+        return self._slave_timeout_tiers.get(getattr(m, "type", None), self._slave_timeout_default)
+
     def _call_slave(self, m):
         """带超时的 slave 调用。超时后抛 EFBMessageError,上层会给用户提示。
 
         注意:超时后后台线程仍可能完成发送,极端情况下用户需在微信端确认。
         """
+        timeout = self._slave_timeout_for(m)
         future = self._slave_executor.submit(coordinator.send_message, m)
         try:
-            return future.result(timeout=self._slave_call_timeout)
+            return future.result(timeout=timeout)
         except FuturesTimeoutError:
-            self.logger.error("调用 slave 发送消息超时(%ss),已放弃等待", self._slave_call_timeout)
+            self.logger.error("调用 slave 发送消息超时(%ss,类型=%s),已放弃等待",
+                              timeout, getattr(m, "type", "?"))
             raise EFBMessageError(
                 self._("Slave channel timed out while sending the message. "
                        "Please check on the slave side whether it was delivered."))
@@ -212,6 +227,12 @@ class MasterMessageProcessor(LocaleMixin):
         self.message_worker_thread.join()
         for t in getattr(self, "_chat_worker_threads", []):
             t.join()
+        executor = getattr(self, "_slave_executor", None)
+        if executor is not None:
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
 
     def enqueue_message(self, update: Update, context: CallbackContext):
         assert isinstance(update, Update)
