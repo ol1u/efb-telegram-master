@@ -86,6 +86,11 @@ class TopicFinder:
             return
 
         matches: List[Tuple[int, str, str, str, str]] = []
+        chat_rows = 0
+        keyword_matches = 0
+        topic_matches = 0
+        link_matches = 0
+        sample = []
         query = (
             SlaveChatInfo.select()
             .where(
@@ -94,6 +99,17 @@ class TopicFinder:
             )
         )
         for row in query:
+            chat_rows += 1
+            if len(sample) < 20:
+                sample.append(
+                    (
+                        row.slave_chat_name,
+                        row.slave_chat_alias,
+                        row.slave_chat_uid,
+                        row.slave_chat_type,
+                        row.slave_chat_group_id,
+                    )
+                )
             score = match_score(
                 row.slave_chat_name,
                 row.slave_chat_alias,
@@ -102,14 +118,17 @@ class TopicFinder:
             )
             if not score:
                 continue
+            keyword_matches += 1
 
             slave_uid = "{}.{}".format(row.slave_channel_id, row.slave_chat_uid)
             assoc = self._topic_assoc(slave_uid)
             if assoc is None:
                 continue
+            topic_matches += 1
             link = topic_link(assoc.topic_chat_id, assoc.message_thread_id)
             if link is None:
                 continue
+            link_matches += 1
 
             matches.append(
                 (
@@ -122,6 +141,24 @@ class TopicFinder:
             )
 
         if not matches:
+            assoc_sample = []
+            if keyword_matches and not topic_matches:
+                assoc_sample = [
+                    (row.slave_uid, row.topic_chat_id, row.message_thread_id)
+                    for row in TopicAssoc.select().limit(20)
+                ]
+            self.logger.warning(
+                "[find] keyword=%r topic_group=%r chat_rows=%d keyword_matches=%d "
+                "topic_matches=%d link_matches=%d results=0 chat_sample=%r assoc_sample=%r",
+                keyword,
+                self.channel.topic_group,
+                chat_rows,
+                keyword_matches,
+                topic_matches,
+                link_matches,
+                sample,
+                assoc_sample,
+            )
             message.reply_text("没有找到匹配的会话。")
             return
 
@@ -153,6 +190,19 @@ class TopicFinder:
                     self.logger.warning("Cannot parse message ID %s", latest.master_msg_id)
 
             results.append((name, link, chat_type))
+
+        self.logger.warning(
+            "[find] keyword=%r topic_group=%r chat_rows=%d keyword_matches=%d "
+            "topic_matches=%d link_matches=%d results=%d result_names=%r",
+            keyword,
+            self.channel.topic_group,
+            chat_rows,
+            keyword_matches,
+            topic_matches,
+            link_matches,
+            len(results),
+            [name for name, _, _ in results],
+        )
 
         lines = ["找到 {} 个会话：".format(len(results)), ""]
         buttons = []
