@@ -9,7 +9,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackContext
 
 from .db import MsgLog, SlaveChatInfo, TopicAssoc
-from .utils import message_id_str_to_id
+from .utils import chat_id_to_str, message_id_str_to_id
 
 if TYPE_CHECKING:
     from . import TelegramChannel
@@ -69,10 +69,10 @@ class TopicFinder:
         self.channel = channel
         self.logger = logging.getLogger(__name__)
 
-    def _topic_assoc(self, slave_uid: str) -> Optional[TopicAssoc]:
+    def _topic_assoc(self, slave_uid: str, topic_chat_id=None) -> Optional[TopicAssoc]:
         query = TopicAssoc.select().where(TopicAssoc.slave_uid == slave_uid)
-        if self.channel.topic_group:
-            query = query.where(TopicAssoc.topic_chat_id == str(self.channel.topic_group))
+        if topic_chat_id:
+            query = query.where(TopicAssoc.topic_chat_id == str(topic_chat_id))
         return query.order_by(TopicAssoc.id.desc()).first()
 
     def find(self, update: Update, context: CallbackContext):
@@ -84,6 +84,12 @@ class TopicFinder:
         if not keyword:
             message.reply_text("用法：/find 姓名或备注")
             return
+
+        current_chat = update.effective_chat
+        if current_chat is not None and getattr(current_chat, "is_forum", False):
+            preferred_topic_chat_id = current_chat.id
+        else:
+            preferred_topic_chat_id = self.channel.topic_group
 
         matches: List[Tuple[int, str, str, str, str]] = []
         chat_rows = 0
@@ -120,8 +126,10 @@ class TopicFinder:
                 continue
             keyword_matches += 1
 
-            slave_uid = "{}.{}".format(row.slave_channel_id, row.slave_chat_uid)
-            assoc = self._topic_assoc(slave_uid)
+            slave_uid = chat_id_to_str(channel_id=row.slave_channel_id, chat_uid=row.slave_chat_uid)
+            assoc = self._topic_assoc(slave_uid, preferred_topic_chat_id)
+            if assoc is None and preferred_topic_chat_id is not None:
+                assoc = self._topic_assoc(slave_uid)
             if assoc is None:
                 continue
             topic_matches += 1
@@ -148,10 +156,11 @@ class TopicFinder:
                     for row in TopicAssoc.select().limit(20)
                 ]
             self.logger.warning(
-                "[find] keyword=%r topic_group=%r chat_rows=%d keyword_matches=%d "
+                "[find] keyword=%r topic_group=%r preferred_topic=%r chat_rows=%d keyword_matches=%d "
                 "topic_matches=%d link_matches=%d results=0 chat_sample=%r assoc_sample=%r",
                 keyword,
                 self.channel.topic_group,
+                preferred_topic_chat_id,
                 chat_rows,
                 keyword_matches,
                 topic_matches,
@@ -192,10 +201,11 @@ class TopicFinder:
             results.append((name, link, chat_type))
 
         self.logger.warning(
-            "[find] keyword=%r topic_group=%r chat_rows=%d keyword_matches=%d "
+            "[find] keyword=%r topic_group=%r preferred_topic=%r chat_rows=%d keyword_matches=%d "
             "topic_matches=%d link_matches=%d results=%d result_names=%r",
             keyword,
             self.channel.topic_group,
+            preferred_topic_chat_id,
             chat_rows,
             keyword_matches,
             topic_matches,
