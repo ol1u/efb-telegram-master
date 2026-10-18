@@ -11,7 +11,6 @@ def test_match_score():
 
 def test_topic_link():
     assert topic_link("-1001234567890", "42") == "https://t.me/c/1234567890/42"
-    assert topic_link("-1001234567890", "42", "9876") == "https://t.me/c/1234567890/42/9876"
     assert topic_link("-123456", "42") is None
     assert topic_link("123456", "42") is None
     assert topic_link("-1001234567890", "0") is None

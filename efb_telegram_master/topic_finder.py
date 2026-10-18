@@ -8,8 +8,8 @@ from typing import Iterable, List, Optional, Tuple, TYPE_CHECKING
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackContext
 
-from .db import MsgLog, SlaveChatInfo, TopicAssoc
-from .utils import chat_id_to_str, message_id_str_to_id
+from .db import SlaveChatInfo, TopicAssoc
+from .utils import chat_id_to_str
 
 if TYPE_CHECKING:
     from . import TelegramChannel
@@ -35,8 +35,8 @@ def match_score(name: Optional[str], alias: Optional[str], uid: Optional[str], k
     return 0
 
 
-def topic_link(topic_chat_id: str, message_thread_id: str, message_id: Optional[str] = None) -> Optional[str]:
-    """Build a link that opens an existing forum topic or a message in it."""
+def topic_link(topic_chat_id: str, message_thread_id: str) -> Optional[str]:
+    """Build a link that opens an existing forum topic."""
     topic_chat_id = str(topic_chat_id)
     message_thread_id = str(message_thread_id)
     if not topic_chat_id or not message_thread_id or message_thread_id == "0":
@@ -46,10 +46,7 @@ def topic_link(topic_chat_id: str, message_thread_id: str, message_id: Optional[
     else:
         # Topics only exist in supergroups, whose IDs start with -100.
         return None
-    base = "https://t.me/c/{}/{}".format(topic_chat_id, message_thread_id)
-    if message_id:
-        return "{}/{}".format(base, message_id)
-    return base
+    return "https://t.me/c/{}/{}".format(topic_chat_id, message_thread_id)
 
 
 def display_name(name: Optional[str], alias: Optional[str]) -> str:
@@ -112,7 +109,7 @@ class TopicFinder:
 
         preferred_assocs, fallback_assocs = self._topic_maps(preferred_topic_chat_id)
 
-        matches: List[Tuple[int, str, str, str, str]] = []
+        matches: List[Tuple[int, str, str, str]] = []
         chat_rows = 0
         keyword_matches = 0
         topic_matches = 0
@@ -159,7 +156,6 @@ class TopicFinder:
                     display_name(row.slave_chat_name, row.slave_chat_alias),
                     link,
                     row.slave_chat_type,
-                    slave_uid,
                 )
             )
 
@@ -179,33 +175,14 @@ class TopicFinder:
             return
 
         seen = set()
-        selected = []
-        for score, name, base_link, chat_type, slave_uid in sorted(matches, key=lambda item: (-item[0], item[1])):
-            if base_link in seen:
-                continue
-            seen.add(base_link)
-            selected.append((name, base_link, chat_type, slave_uid))
-            if len(selected) >= self.MAX_RESULTS:
-                break
-
         results = []
-        for name, base_link, chat_type, slave_uid in selected:
-            link = base_link
-            latest = (
-                MsgLog.select(MsgLog.master_msg_id)
-                .where(MsgLog.slave_origin_uid == slave_uid)
-                .order_by(MsgLog.time.desc())
-                .limit(1)
-                .first()
-            )
-            if latest:
-                try:
-                    _, message_id = message_id_str_to_id(latest.master_msg_id)
-                    link = "{}/{}".format(base_link, message_id)
-                except (IndexError, ValueError):
-                    self.logger.warning("Cannot parse message ID %s", latest.master_msg_id)
-
+        for score, name, link, chat_type in sorted(matches, key=lambda item: (-item[0], item[1])):
+            if link in seen:
+                continue
+            seen.add(link)
             results.append((name, link, chat_type))
+            if len(results) >= self.MAX_RESULTS:
+                break
 
         self.logger.debug(
             "[find] keyword=%r topic_group=%r preferred_topic=%r chat_rows=%d keyword_matches=%d "
