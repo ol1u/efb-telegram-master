@@ -5,7 +5,7 @@ import html
 import logging
 from typing import Iterable, List, Optional, Tuple, TYPE_CHECKING
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
 from telegram.ext import CallbackContext
 
 from .db import SlaveChatInfo, TopicAssoc
@@ -198,7 +198,6 @@ class TopicFinder:
         )
 
         lines = ["找到 {} 个会话：".format(len(results)), ""]
-        buttons = []
         for index, (name, link, chat_type) in enumerate(results, 1):
             type_label = "群" if chat_type == "Group" else "私聊"
             lines.append(
@@ -206,12 +205,9 @@ class TopicFinder:
                     index, html.escape(name), type_label, link
                 )
             )
-            button_name = name if len(name) <= 40 else name[:39] + "…"
-            buttons.append([InlineKeyboardButton("打开 {}".format(button_name), url=link)])
 
         message.reply_text(
             "\n".join(lines),
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(buttons),
             disable_web_page_preview=True,
         )
