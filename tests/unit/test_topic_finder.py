@@ -1,4 +1,5 @@
-from efb_telegram_master.topic_finder import display_name, match_score, topic_link
+from efb_telegram_master.topic_finder import build_topic_maps, display_name, match_score, topic_link
+from efb_telegram_master.utils import chat_id_to_str
 
 
 def test_match_score():
@@ -19,3 +20,20 @@ def test_topic_link():
 def test_display_name():
     assert display_name("张三", "客户张三") == "客户张三（张三）"
     assert display_name("张三", None) == "张三"
+
+
+def test_chat_id_to_str_uses_space_separator():
+    assert chat_id_to_str(channel_id="honus.comwechat", chat_uid="wxid_1") == "honus.comwechat wxid_1"
+
+
+def test_build_topic_maps_prefers_current_group():
+    rows = [
+        ("honus.comwechat wxid_1", "-100111", "5"),
+        ("honus.comwechat wxid_1", "-100222", "6"),
+        ("honus.comwechat wxid_2", "-100222", "7"),
+    ]
+    preferred, fallback = build_topic_maps(rows, "-100111")
+    assert preferred["honus.comwechat wxid_1"] == ("-100111", "5")
+    assert fallback["honus.comwechat wxid_1"] == ("-100111", "5")
+    assert fallback["honus.comwechat wxid_2"] == ("-100222", "7")
+    assert "honus.comwechat wxid_2" not in preferred

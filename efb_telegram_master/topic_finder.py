@@ -3,7 +3,7 @@
 
 import html
 import logging
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import Iterable, List, Optional, Tuple, TYPE_CHECKING
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackContext
@@ -60,6 +60,19 @@ def display_name(name: Optional[str], alias: Optional[str]) -> str:
     return alias or name or "未命名会话"
 
 
+def build_topic_maps(rows: Iterable[Tuple[str, str, str]],
+                     preferred_topic_chat_id=None):
+    """Build preferred and fallback maps from newest-first topic rows."""
+    preferred = {}
+    fallback = {}
+    for slave_uid, topic_chat_id, message_thread_id in rows:
+        value = (topic_chat_id, message_thread_id)
+        fallback.setdefault(slave_uid, value)
+        if preferred_topic_chat_id and topic_chat_id == str(preferred_topic_chat_id):
+            preferred.setdefault(slave_uid, value)
+    return preferred, fallback
+
+
 class TopicFinder:
     """Search chat names and aliases, then jump to their existing topics."""
 
@@ -69,11 +82,17 @@ class TopicFinder:
         self.channel = channel
         self.logger = logging.getLogger(__name__)
 
-    def _topic_assoc(self, slave_uid: str, topic_chat_id=None) -> Optional[TopicAssoc]:
-        query = TopicAssoc.select().where(TopicAssoc.slave_uid == slave_uid)
-        if topic_chat_id:
-            query = query.where(TopicAssoc.topic_chat_id == str(topic_chat_id))
-        return query.order_by(TopicAssoc.id.desc()).first()
+    def _topic_maps(self, preferred_topic_chat_id=None):
+        rows = (
+            TopicAssoc.select(
+                TopicAssoc.slave_uid,
+                TopicAssoc.topic_chat_id,
+                TopicAssoc.message_thread_id,
+            )
+            .order_by(TopicAssoc.id.desc())
+            .tuples()
+        )
+        return build_topic_maps(rows, preferred_topic_chat_id)
 
     def find(self, update: Update, context: CallbackContext):
         message = update.effective_message
@@ -91,14 +110,21 @@ class TopicFinder:
         else:
             preferred_topic_chat_id = self.channel.topic_group
 
+        preferred_assocs, fallback_assocs = self._topic_maps(preferred_topic_chat_id)
+
         matches: List[Tuple[int, str, str, str, str]] = []
         chat_rows = 0
         keyword_matches = 0
         topic_matches = 0
         link_matches = 0
-        sample = []
         query = (
-            SlaveChatInfo.select()
+            SlaveChatInfo.select(
+                SlaveChatInfo.slave_channel_id,
+                SlaveChatInfo.slave_chat_uid,
+                SlaveChatInfo.slave_chat_name,
+                SlaveChatInfo.slave_chat_alias,
+                SlaveChatInfo.slave_chat_type,
+            )
             .where(
                 (SlaveChatInfo.slave_chat_group_id.is_null(True))
                 & (SlaveChatInfo.slave_chat_type.in_(["Private", "Group"]))
@@ -106,16 +132,6 @@ class TopicFinder:
         )
         for row in query:
             chat_rows += 1
-            if len(sample) < 20:
-                sample.append(
-                    (
-                        row.slave_chat_name,
-                        row.slave_chat_alias,
-                        row.slave_chat_uid,
-                        row.slave_chat_type,
-                        row.slave_chat_group_id,
-                    )
-                )
             score = match_score(
                 row.slave_chat_name,
                 row.slave_chat_alias,
@@ -126,14 +142,13 @@ class TopicFinder:
                 continue
             keyword_matches += 1
 
+            # Keep this in sync with EFB's "channel_id chat_uid" key format.
             slave_uid = chat_id_to_str(channel_id=row.slave_channel_id, chat_uid=row.slave_chat_uid)
-            assoc = self._topic_assoc(slave_uid, preferred_topic_chat_id)
-            if assoc is None and preferred_topic_chat_id is not None:
-                assoc = self._topic_assoc(slave_uid)
+            assoc = preferred_assocs.get(slave_uid) or fallback_assocs.get(slave_uid)
             if assoc is None:
                 continue
             topic_matches += 1
-            link = topic_link(assoc.topic_chat_id, assoc.message_thread_id)
+            link = topic_link(*assoc)
             if link is None:
                 continue
             link_matches += 1
@@ -149,15 +164,9 @@ class TopicFinder:
             )
 
         if not matches:
-            assoc_sample = []
-            if keyword_matches and not topic_matches:
-                assoc_sample = [
-                    (row.slave_uid, row.topic_chat_id, row.message_thread_id)
-                    for row in TopicAssoc.select().limit(20)
-                ]
-            self.logger.warning(
+            self.logger.debug(
                 "[find] keyword=%r topic_group=%r preferred_topic=%r chat_rows=%d keyword_matches=%d "
-                "topic_matches=%d link_matches=%d results=0 chat_sample=%r assoc_sample=%r",
+                "topic_matches=%d link_matches=%d results=0",
                 keyword,
                 self.channel.topic_group,
                 preferred_topic_chat_id,
@@ -165,8 +174,6 @@ class TopicFinder:
                 keyword_matches,
                 topic_matches,
                 link_matches,
-                sample,
-                assoc_sample,
             )
             message.reply_text("没有找到匹配的会话。")
             return
@@ -200,9 +207,9 @@ class TopicFinder:
 
             results.append((name, link, chat_type))
 
-        self.logger.warning(
+        self.logger.debug(
             "[find] keyword=%r topic_group=%r preferred_topic=%r chat_rows=%d keyword_matches=%d "
-            "topic_matches=%d link_matches=%d results=%d result_names=%r",
+            "topic_matches=%d link_matches=%d results=%d",
             keyword,
             self.channel.topic_group,
             preferred_topic_chat_id,
@@ -211,7 +218,6 @@ class TopicFinder:
             topic_matches,
             link_matches,
             len(results),
-            [name for name, _, _ in results],
         )
 
         lines = ["找到 {} 个会话：".format(len(results)), ""]
