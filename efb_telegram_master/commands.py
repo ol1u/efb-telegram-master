@@ -13,6 +13,7 @@ from ehforwarderbot.message import MessageCommand
 from ehforwarderbot.types import ExtraCommandName
 from .constants import Flags
 from .locale_mixin import LocaleMixin
+from .topic_finder import TopicFinder
 
 if TYPE_CHECKING:
     from . import TelegramChannel
@@ -41,9 +42,12 @@ class CommandsManager(LocaleMixin):
         self.bot = channel.bot_manager
         self.msg_storage: Dict[Tuple[int, int], ETMCommandMsgStorage] = dict()
         self.logger = logging.getLogger(__name__)
+        self.topic_finder = TopicFinder(channel)
 
         self.bot.dispatcher.add_handler(
             CommandHandler("extra", self.extra_listing))
+        self.bot.dispatcher.add_handler(
+            CommandHandler("find", self.topic_finder.find))
         self.bot.dispatcher.add_handler(
             MessageHandler(
                 Filters.regex(r"^/h_(?P<id>[0-9]+)_(?P<command>[a-z0-9_-]+)"),
