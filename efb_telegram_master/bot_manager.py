@@ -15,6 +15,7 @@ from telegram.ext import CallbackContext, Filters, MessageHandler, Updater, Disp
 from . import utils
 from .locale_handler import LocaleHandler
 from .locale_mixin import LocaleMixin
+from .trusted_bots import build_trusted_bot_filter
 
 if TYPE_CHECKING:
     from . import TelegramChannel
@@ -218,10 +219,16 @@ class TelegramBotManager(LocaleMixin):
         self.me: User = me
         self.logger.debug("Connection to Telegram bot API is OK...")
         self.admins: List[int] = config['admins']
+        self.trusted_bots: List[int] = config.get('trusted_bots', [])
         self.dispatcher: Dispatcher = self.updater.dispatcher
         self.logger.debug("Adding base dispatchers...")
-        # New whitelist handler
-        whitelist_filter = ~Filters.user(user_id=self.admins)
+        # New whitelist handler: drop everything not from admins, except plain
+        # messages from trusted bots in the allowed chats.
+        allowed_filter = Filters.user(user_id=self.admins)
+        trusted_filter = build_trusted_bot_filter(self.trusted_bots, config.get('trusted_bot_chats', []))
+        if trusted_filter is not None:
+            allowed_filter = allowed_filter | trusted_filter
+        whitelist_filter = ~allowed_filter
         self.dispatcher.add_handler(
             MessageHandler(whitelist_filter, lambda update, context: ...))
         self.dispatcher.add_handler(LocaleHandler(channel))

@@ -42,6 +42,7 @@ from .message import ETMMsg
 from .rpc_utils import RPCUtilities
 from .slave_message import SlaveMessageProcessor
 from .image_dedupe import ImageDedupeManager
+from .trusted_bots import normalize_id_list
 from .utils import ExperimentalFlagsManager, EFBChannelChatIDStr, TelegramChatID, TelegramMessageID
 
 
@@ -201,6 +202,10 @@ class TelegramChannel(MasterChannel):
                 if not isinstance(data['admins'][i], int):
                     raise ValueError(self._('Admin ID is expected to be an int, but {data} is found.')
                                      .format(data=data['admins'][i]))
+            data['trusted_bots'] = normalize_id_list(data.get('trusted_bots'), 'trusted_bots')
+            data['trusted_bot_chats'] = normalize_id_list(data.get('trusted_bot_chats'), 'trusted_bot_chats')
+            if set(data['trusted_bots']) & set(data['admins']):
+                raise ValueError(self._('trusted_bots must not overlap with admins.'))
 
             self.config = data.copy()
 
