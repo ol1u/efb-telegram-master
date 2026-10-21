@@ -309,6 +309,12 @@ class MasterMessageProcessor(LocaleMixin):
                         self.logger.debug("[%s] Chat %s is a forum, and all destinations are in topics. The new message is not in any topic, so ignore it.", mid, message.chat)
                         return
 
+        if destination is None and message.from_user and message.from_user.id in self.bot.trusted_bots:
+            # Trusted bots may only relay into linked chats/topics: no reply/cache
+            # based routing, and no error replies elsewhere.
+            self.logger.debug("[%s] Ignored trusted bot message without linked destination", mid)
+            return
+
         if destination is None:  # not singly linked
             quote = False
             self.logger.debug("[%s] Chat %s is not singly-linked", mid, update.effective_chat)
