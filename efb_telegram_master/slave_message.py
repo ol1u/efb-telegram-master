@@ -128,7 +128,7 @@ class SlaveMessageProcessor(LocaleMixin):
             if tg_dest:
                 try:
                     self.bot.send_message(chat_id=tg_dest, message_thread_id=thread_id,
-                                          text="[消息投递失败,请在微信端查看]")
+                                          text="[微信→Telegram 投递失败，请在微信查看原文]")
                 except Exception:
                     self.logger.exception("[%s] 发送投递失败提示失败", msg.uid)
         return msg
