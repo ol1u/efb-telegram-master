@@ -448,7 +448,7 @@ class SlaveMessageProcessor(LocaleMixin):
                                          **self.build_reply_target_kwargs(target_msg_id, target_quote_text))
 
     # Parameters to decide when to pictures as files
-    IMG_MIN_SIZE = 1600
+    IMG_MIN_SIZE = 5000
     """Threshold of dimension of the shorter side to send as file."""
     IMG_MAX_SIZE = 1200
     """Threshold of dimension of the longer side to send as file, used along with IMG_SIZE_RATIO."""
